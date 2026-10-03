@@ -1,42 +1,27 @@
 package com.example.lspempty;
 
+import android.app.Application;
+import android.content.Context;
 import android.graphics.drawable.Drawable;
+import android.os.Bundle;
 
 import de.robv.android.xposed.IXposedHookLoadPackage;
-import de.robv.android.xposed.XC_MethodReplacement;
+import de.robv.android.xposed.XC_MethodHook;
 import de.robv.android.xposed.XposedBridge;
 import de.robv.android.xposed.XposedHelpers;
 import de.robv.android.xposed.callbacks.XC_LoadPackage;
 
 /**
  * LSPosed 模块：屏蔽「游戏助手」com.oplus.games 的启动动画 + 解除助手栏应用数量限制。
- *
- * 反编译分析结论（10.41.3，包名 com.oplus.games）：
- *
- * 【启动动画】
- * 1. 启动动画的唯一入口漏斗是
- *    com.content.games.arch.newarch.capabilities.StartupAnimationFeature
- *    的方法 c(String packageName, Drawable drawable)（createStartupAnimation）。
- *    该方法内部按条件分派到三条路径：
- *      - GTBoost 动画   : business.module.gtboost.GTBoostViewManager.h()
- *      - HyperBoost 动画: business.secondarypanel.manager.c.h(pkg, "float", drawable)
- *      - unique 动画    : IFeatureStartUpUnique.showStartUpAnim(...)
- * 2. GTBoost 浮层由 GTBoostView 渲染（全屏 overlay，onCreate 中播放帧动画并 2750ms 后结束）。
- *    把 StartupAnimationFeature.c(String, Drawable) 替换为空实现，即可一次屏蔽所有启动动画；
- *    同时对 GTBoostViewManager.h() 再做一层防御性屏蔽。
- *
- * 【助手栏应用数量限制】
- * 1. 最大数量由 AppDataProviderCommon.getMaxAppCountLimit() 提供（默认 20），
- *    被 DesignatedAppsHelper 静态初始化、AppDataSideBarEditModel、AppDataProviderBase 等多处消费。
- * 2. 添加应用时的直接守门是 DesignatedAppsHelper.u(boolean isAuto)：
- *    若当前数量 >= max，则返回 true（达到上限）并弹「已添加 N 个应用，无法继续添加」toast，拒绝添加。
- *    解除方式：① getMaxAppCountLimit() 返回大值（影响 UI 可添加数量计算与保存列表截断）；
- *              ② u(boolean) 始终返回 false（直接绕过添加守门，防御静态字段已初始化的情况）。
+ * 功能均可通过桌面 App「游戏助手增强」独立开关，开关实时生效（无需重启目标应用）。
  */
 public class MainHook implements IXposedHookLoadPackage {
 
     private static final String TAG = "NoSplash";
     private static final String TARGET_PKG = "com.oplus.games";
+
+    // 目标进程的 Application Context（hook Application.onCreate 捕获，比反射更可靠）
+    private static volatile Context sAppContext = null;
 
     @Override
     public void handleLoadPackage(XC_LoadPackage.LoadPackageParam lpparam) {
@@ -45,79 +30,257 @@ public class MainHook implements IXposedHookLoadPackage {
         }
         ClassLoader cl = lpparam.classLoader;
 
-        // 1) 唯一入口漏斗：屏蔽所有启动动画（GTBoost / HyperBoost / unique）
-        hookStartupAnimationFunnel(cl);
+        XposedBridge.log(TAG + " module loaded for " + TARGET_PKG);
 
-        // 2) 防御性：直接屏蔽 GTBoost 浮层创建入口
-        hookGTBoost(cl);
+        // 0) 立即写激活标记（只要 hook 被加载就写，不依赖 Application.onCreate）
+        markActivated(lpparam);
 
-        // 3) 解除助手栏应用数量限制（默认 20 个）
+        // 1) 捕获 Application Context，用于跨进程读配置
+        hookApplicationContext();
+
+        // 2) 启动动画漏斗 + GTBoost 防御
+        hookStartupAnimation(cl);
+
+        // 3) 解除助手栏应用数量限制
         hookAppCountLimit(cl);
+
+        // 4) 隐藏「未安装应用」推荐广告区
+        hookHideRecommended(cl);
     }
 
-    private void hookStartupAnimationFunnel(ClassLoader cl) {
+    private void hookApplicationContext() {
         try {
-            Class<?> feature = XposedHelpers.findClass(
-                    "com.content.games.arch.newarch.capabilities.StartupAnimationFeature", cl);
-            XposedHelpers.findAndHookMethod(feature, "c", String.class, Drawable.class,
-                    new XC_MethodReplacement() {
+            XposedHelpers.findAndHookMethod(Application.class, "onCreate",
+                    new XC_MethodHook() {
                         @Override
-                        protected Object replaceHookedMethod(MethodHookParam param) {
-                            return null;
+                        protected void afterHookedMethod(MethodHookParam param) {
+                            sAppContext = (Application) param.thisObject;
+                            XposedBridge.log(TAG + " Application context captured");
+                            // 再次确认写激活标记（兜底）
+                            markActivated(null);
                         }
                     });
-            XposedBridge.log(TAG + " hooked StartupAnimationFeature.c(String, Drawable)");
         } catch (Throwable t) {
-            XposedBridge.log(TAG + " hook StartupAnimationFeature.c failed: " + t);
+            XposedBridge.log(TAG + " hook Application.onCreate failed: " + t);
         }
     }
 
-    private void hookGTBoost(ClassLoader cl) {
+    /** 写入「已激活」标记（跨进程写回模块 SettingsProvider）。lpparam 可为 null。 */
+    private static void markActivated(XC_LoadPackage.LoadPackageParam lpparam) {
         try {
-            Class<?> mgr = XposedHelpers.findClass("business.module.gtboost.GTBoostViewManager", cl);
-            XposedHelpers.findAndHookMethod(mgr, "h", new XC_MethodReplacement() {
+            Context ctx = sAppContext;
+            if (ctx == null) {
+                // handleLoadPackage 阶段：通过反射 ActivityThread.currentApplication() 获取
+                try {
+                    Class<?> at = Class.forName("android.app.ActivityThread");
+                    Object app = at.getMethod("currentApplication").invoke(null);
+                    if (app != null) ctx = (Context) app;
+                } catch (Throwable ignored) {}
+            }
+            if (ctx == null && lpparam != null) {
+                // 最后兜底：用 AndroidAppHelper（LSPosed 内部类）
+                try {
+                    Class<?> aah = Class.forName("de.robv.android.xposed.AndroidAppHelper");
+                    Object app = aah.getMethod("currentApplication").invoke(null);
+                    if (app != null) ctx = (Context) app;
+                } catch (Throwable ignored) {}
+            }
+            if (ctx == null) {
+                XposedBridge.log(TAG + " markActivated: context still null, skip");
+                return;
+            }
+            Bundle b = new Bundle();
+            b.putBoolean(SettingsProvider.EXTRA_VALUE, true);
+            Bundle result = ctx.getContentResolver().call(
+                    SettingsProvider.CONTENT_URI,
+                    SettingsProvider.METHOD_SET_BOOLEAN,
+                    SettingsProvider.KEY_ACTIVATED, b);
+            XposedBridge.log(TAG + " markActivated: written activated=true, result=" + result);
+        } catch (Throwable t) {
+            XposedBridge.log(TAG + " markActivated failed: " + t);
+        }
+    }
+
+    // ---------- 配置读取（每次实时读，不缓存，保证开关即时生效） ----------
+
+    private static boolean isBlockStartup() {
+        return readPref(SettingsProvider.KEY_BLOCK_STARTUP, true);
+    }
+
+    private static boolean isRemoveLimit() {
+        return readPref(SettingsProvider.KEY_REMOVE_LIMIT, true);
+    }
+
+    private static boolean isHideRecommend() {
+        return readPref(SettingsProvider.KEY_HIDE_RECOMMEND, true);
+    }
+
+    private static boolean readPref(String key, boolean def) {
+        try {
+            Context ctx = sAppContext != null ? sAppContext : getCurrentApplication();
+            if (ctx == null) return def;
+            Bundle b = ctx.getContentResolver().call(
+                    SettingsProvider.CONTENT_URI,
+                    SettingsProvider.METHOD_GET_BOOLEAN, key, null);
+            if (b != null) {
+                return b.getBoolean(SettingsProvider.EXTRA_VALUE, def);
+            }
+        } catch (Throwable t) {
+            XposedBridge.log(TAG + " readPref " + key + " failed: " + t);
+        }
+        return def;
+    }
+
+    /** 反射调用 AndroidAppHelper.currentApplication()（兜底，该类不在编译用的 API jar 中）。 */
+    private static Context getCurrentApplication() {
+        try {
+            Class<?> helper = Class.forName("de.robv.android.xposed.AndroidAppHelper");
+            java.lang.reflect.Method m = helper.getMethod("currentApplication");
+            return (Context) m.invoke(null);
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    // ---------- 启动动画 ----------
+
+    private void hookStartupAnimation(ClassLoader cl) {
+        // 漏斗入口：StartupAnimationFeature.c(String, Drawable)
+        try {
+            Class<?> feature = XposedHelpers.findClass(
+                    "com.content.games.arch.newarch.capabilities.StartupAnimationFeature", cl);
+            XposedBridge.hookAllMethods(feature, "c", new XC_MethodHook() {
                 @Override
-                protected Object replaceHookedMethod(MethodHookParam param) {
-                    return null;
+                protected void beforeHookedMethod(MethodHookParam param) {
+                    if (isBlockStartup()) {
+                        param.setResult(null);
+                    }
                 }
             });
-            XposedBridge.log(TAG + " hooked GTBoostViewManager.h()");
+            XposedBridge.log(TAG + " hooked StartupAnimationFeature.c (conditional)");
+        } catch (Throwable t) {
+            XposedBridge.log(TAG + " hook StartupAnimationFeature.c failed: " + t);
+        }
+
+        // 防御性：GTBoostViewManager.h()
+        try {
+            Class<?> mgr = XposedHelpers.findClass("business.module.gtboost.GTBoostViewManager", cl);
+            XposedBridge.hookAllMethods(mgr, "h", new XC_MethodHook() {
+                @Override
+                protected void beforeHookedMethod(MethodHookParam param) {
+                    if (isBlockStartup()) {
+                        param.setResult(null);
+                    }
+                }
+            });
+            XposedBridge.log(TAG + " hooked GTBoostViewManager.h (conditional)");
         } catch (Throwable t) {
             XposedBridge.log(TAG + " hook GTBoostViewManager.h failed: " + t);
         }
     }
 
+    // ---------- 应用数量限制 ----------
+
     private void hookAppCountLimit(ClassLoader cl) {
-        // ① 把最大应用数量从 20 提到 1000，影响所有消费方（UI 可添加数量、保存列表截断等）
+        // ① getDeclaredMethods() 拿真实 Method 对象，afterHookedMethod 里把 20 改 100
         try {
-            Class<?> provider = XposedHelpers.findClass(
+            Class<?> commonClass = XposedHelpers.findClass(
                     "business.gamedock.sort.AppDataProviderCommon", cl);
-            XposedHelpers.findAndHookMethod(provider, "getMaxAppCountLimit",
-                    new XC_MethodReplacement() {
-                        @Override
-                        protected Object replaceHookedMethod(MethodHookParam param) {
-                            return 1000;
+            int hooked = 0;
+            for (java.lang.reflect.Method m : commonClass.getDeclaredMethods()) {
+                if (m.getParameterTypes().length != 0) continue;
+                if (m.getReturnType() != int.class) continue;
+                final String methodName = m.getName();
+                XposedBridge.hookMethod(m, new XC_MethodHook() {
+                    @Override
+                    protected void afterHookedMethod(MethodHookParam param) {
+                        if (!isRemoveLimit()) return;
+                        Object res = param.getResult();
+                        if (res instanceof Integer && (Integer) res == 20) {
+                            param.setResult(100);
                         }
-                    });
-            XposedBridge.log(TAG + " hooked AppDataProviderCommon.getMaxAppCountLimit -> 1000");
+                    }
+                });
+                XposedBridge.log(TAG + " hooked int-getter " + commonClass.getSimpleName()
+                        + "." + methodName + "() (conditional 20->100)");
+                hooked++;
+            }
+            if (hooked == 0) {
+                XposedBridge.log(TAG + " WARNING: no no-arg int method in AppDataProviderCommon");
+            }
         } catch (Throwable t) {
-            XposedBridge.log(TAG + " hook getMaxAppCountLimit failed: " + t);
+            XposedBridge.log(TAG + " hook int-getters failed: " + t);
         }
 
-        // ② 直接绕过添加守门：DesignatedAppsHelper.u(boolean) 始终返回 false（未达上限）
+        // ② DesignatedAppsHelper.u(boolean) — 开启时直接返回 false（未达上限）
         try {
             Class<?> helper = XposedHelpers.findClass(
                     "business.module.customdefine.apps.DesignatedAppsHelper", cl);
-            XposedHelpers.findAndHookMethod(helper, "u", boolean.class,
-                    new XC_MethodReplacement() {
-                        @Override
-                        protected Object replaceHookedMethod(MethodHookParam param) {
-                            return false;
-                        }
-                    });
-            XposedBridge.log(TAG + " hooked DesignatedAppsHelper.u(boolean) -> false");
+            XposedHelpers.findAndHookMethod(helper, "u", boolean.class, new XC_MethodHook() {
+                @Override
+                protected void beforeHookedMethod(MethodHookParam param) {
+                    if (isRemoveLimit()) {
+                        param.setResult(false);
+                    }
+                }
+            });
+            XposedBridge.log(TAG + " hooked DesignatedAppsHelper.u(boolean) (conditional)");
         } catch (Throwable t) {
             XposedBridge.log(TAG + " hook DesignatedAppsHelper.u failed: " + t);
+        }
+    }
+
+    // ---------- 隐藏推荐应用 ----------
+
+    private void hookHideRecommended(ClassLoader cl) {
+        // ① CustomAppSearcher.c() — 搜索时的「未安装应用」分区，把 notInstalled 列表清空
+        try {
+            Class<?> searcher = XposedHelpers.findClass(
+                    "business.module.customdefine.apps.search.CustomAppSearcher", cl);
+            XposedHelpers.findAndHookMethod(searcher, "c",
+                    java.util.List.class, java.util.List.class,
+                    java.util.Set.class, java.util.List.class,
+                    new XC_MethodHook() {
+                        @Override
+                        protected void afterHookedMethod(MethodHookParam param) {
+                            if (!isHideRecommend()) return;
+                            Object merged = param.getResult();
+                            if (merged == null) return;
+                            try {
+                                java.util.List<?> installed =
+                                        (java.util.List<?>) XposedHelpers.callMethod(merged, "a");
+                                Object newMerged = merged.getClass()
+                                        .getConstructor(java.util.List.class, java.util.List.class)
+                                        .newInstance(installed, java.util.Collections.emptyList());
+                                param.setResult(newMerged);
+                            } catch (Throwable t) {
+                                XposedBridge.log(TAG + " hideRecommended filter failed: " + t);
+                            }
+                        }
+                    });
+            XposedBridge.log(TAG + " hooked CustomAppSearcher.c (hide recommended)");
+        } catch (Throwable t) {
+            XposedBridge.log(TAG + " hook CustomAppSearcher.c failed: " + t);
+        }
+
+        // ② CusDefAppsModel.e(List, List, boolean skipInjectingUninstalled)
+        //    编辑应用主网格的推荐应用注入点，强制 skipInjectingUninstalled=true
+        try {
+            Class<?> model = XposedHelpers.findClass(
+                    "business.module.customdefine.apps.vm.CusDefAppsModel", cl);
+            XposedHelpers.findAndHookMethod(model, "e",
+                    java.util.List.class, java.util.List.class, boolean.class,
+                    new XC_MethodHook() {
+                        @Override
+                        protected void beforeHookedMethod(MethodHookParam param) {
+                            if (isHideRecommend()) {
+                                param.args[2] = true;
+                            }
+                        }
+                    });
+            XposedBridge.log(TAG + " hooked CusDefAppsModel.e (skip inject uninstalled)");
+        } catch (Throwable t) {
+            XposedBridge.log(TAG + " hook CusDefAppsModel.e failed: " + t);
         }
     }
 }

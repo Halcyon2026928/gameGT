@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="bg_start">#0D0D1A</color>
+    <color name="bg_end">#1A0A2E</color>
+    <color name="card_bg">#16162A</color>
+    <color name="card_stroke">#2A2A45</color>
+    <color name="accent_cyan">#00F0FF</color>
+    <color name="accent_purple">#A855F7</color>
+    <color name="accent_pink">#FF6B9D</color>
+    <color name="text_primary">#FFFFFF</color>
+    <color name="text_secondary">#9A9AB8</color>
+    <color name="switch_track_off">#2A2A45</color>
+    <color name="switch_thumb_off">#6A6A8A</color>
+    <color name="status_on">#00E676</color>
+    <color name="status_off">#FF5252</color>
+    <color name="pill_bg">#1A1A2E</color>
+    <color name="hint_bg">#12121F</color>
+</resources>

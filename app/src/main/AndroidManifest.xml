@@ -1,11 +1,34 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <application
-        android:theme="@android:style/Theme.Material.Light"
-        android:label="gameGT">
+        android:allowBackup="true"
+        android:icon="@drawable/ic_launcher"
+        android:label="GTBoost"
+        android:theme="@style/Theme.GameAssistant"
+        android:supportsRtl="true">
+
+        <!-- LSPosed 模块元数据 -->
         <meta-data android:name="xposedmodule" android:value="true"/>
-        <meta-data android:name="xposeddescription" android:value="屏蔽游戏助手(com.oplus.games)的启动动画（GTBoost/HyperBoost/unique）"/>
+        <meta-data android:name="xposeddescription" android:value="屏蔽游戏助手启动动画 + 解除助手栏应用数量上限（com.oplus.games）"/>
         <meta-data android:name="xposedminversion" android:value="54"/>
         <meta-data android:name="xposedscope" android:resource="@array/xposed_scope"/>
+
+        <!-- 桌面设置入口 -->
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:label="GTBoost">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!-- 跨进程配置提供器（供 hook 端读取开关状态） -->
+        <provider
+            android:name=".SettingsProvider"
+            android:authorities="com.example.lspempty.settings"
+            android:exported="true" />
+
     </application>
 </manifest>

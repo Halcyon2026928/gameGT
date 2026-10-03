@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 浅色主题配色：清爽的浅蓝紫白 -->
+    <color name="bg_start">#F5F7FF</color>
+    <color name="bg_end">#E9EEFF</color>
+    <color name="card_bg">#FFFFFF</color>
+    <color name="card_stroke">#E3E8F5</color>
+    <color name="text_primary">#1A1A2E</color>
+    <color name="text_secondary">#6A6A8A</color>
+    <color name="switch_track_off">#E0E3F0</color>
+    <color name="switch_thumb_off">#9AA0B8</color>
+    <color name="pill_bg">#FFFFFF</color>
+    <color name="hint_bg">#F0F2FF</color>
+</resources>
