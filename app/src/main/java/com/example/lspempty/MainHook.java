@@ -32,19 +32,16 @@ public class MainHook implements IXposedHookLoadPackage {
 
         XposedBridge.log(TAG + " module loaded for " + TARGET_PKG);
 
-        // 0) 立即写激活标记（只要 hook 被加载就写，不依赖 Application.onCreate）
-        markActivated(lpparam);
-
-        // 1) 捕获 Application Context，用于跨进程读配置
+        // 0) 捕获 Application Context，用于跨进程读配置
         hookApplicationContext();
 
-        // 2) 启动动画漏斗 + GTBoost 防御
+        // 1) 启动动画漏斗 + GTBoost 防御
         hookStartupAnimation(cl);
 
-        // 3) 解除助手栏应用数量限制
+        // 2) 解除助手栏应用数量限制
         hookAppCountLimit(cl);
 
-        // 4) 隐藏「未安装应用」推荐广告区
+        // 3) 隐藏「未安装应用」推荐广告区
         hookHideRecommended(cl);
     }
 
@@ -56,48 +53,10 @@ public class MainHook implements IXposedHookLoadPackage {
                         protected void afterHookedMethod(MethodHookParam param) {
                             sAppContext = (Application) param.thisObject;
                             XposedBridge.log(TAG + " Application context captured");
-                            // 再次确认写激活标记（兜底）
-                            markActivated(null);
                         }
                     });
         } catch (Throwable t) {
             XposedBridge.log(TAG + " hook Application.onCreate failed: " + t);
-        }
-    }
-
-    /** 写入「已激活」标记（跨进程写回模块 SettingsProvider）。lpparam 可为 null。 */
-    private static void markActivated(XC_LoadPackage.LoadPackageParam lpparam) {
-        try {
-            Context ctx = sAppContext;
-            if (ctx == null) {
-                // handleLoadPackage 阶段：通过反射 ActivityThread.currentApplication() 获取
-                try {
-                    Class<?> at = Class.forName("android.app.ActivityThread");
-                    Object app = at.getMethod("currentApplication").invoke(null);
-                    if (app != null) ctx = (Context) app;
-                } catch (Throwable ignored) {}
-            }
-            if (ctx == null && lpparam != null) {
-                // 最后兜底：用 AndroidAppHelper（LSPosed 内部类）
-                try {
-                    Class<?> aah = Class.forName("de.robv.android.xposed.AndroidAppHelper");
-                    Object app = aah.getMethod("currentApplication").invoke(null);
-                    if (app != null) ctx = (Context) app;
-                } catch (Throwable ignored) {}
-            }
-            if (ctx == null) {
-                XposedBridge.log(TAG + " markActivated: context still null, skip");
-                return;
-            }
-            Bundle b = new Bundle();
-            b.putBoolean(SettingsProvider.EXTRA_VALUE, true);
-            Bundle result = ctx.getContentResolver().call(
-                    SettingsProvider.CONTENT_URI,
-                    SettingsProvider.METHOD_SET_BOOLEAN,
-                    SettingsProvider.KEY_ACTIVATED, b);
-            XposedBridge.log(TAG + " markActivated: written activated=true, result=" + result);
-        } catch (Throwable t) {
-            XposedBridge.log(TAG + " markActivated failed: " + t);
         }
     }
 

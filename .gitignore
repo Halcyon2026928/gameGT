@@ -4,6 +4,7 @@
 /jadx-1.5.2/
 *.apk
 !NoStartupAnimation-LSPosed-*.apk
+!GTBoost-LSPosed-*.apk
 
 # 构建中间产物
 /.build/
