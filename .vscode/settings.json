@@ -1,0 +1,5 @@
+{
+  "java.import.gradle.enabled": true,
+  "java.import.gradle.java.home": "D:\\sdk\\jdk-17.0.20.1+1",
+  "java.jdt.ls.java.home": "D:\\sdk\\jdk-17.0.20.1+1"
+}

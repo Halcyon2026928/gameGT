@@ -1,0 +1,24 @@
+# 反编译与逆向工程产物（体积大，不入库）
+/decompiled/
+/decompiled-res/
+/jadx-1.5.2/
+*.apk
+!NoStartupAnimation-LSPosed-*.apk
+
+# 构建中间产物
+/.build/
+/build/
+/app/build/
+/.gradle/
+/local.properties
+*.idsig
+*.log
+
+# IDE
+/.idea/
+*.iml
+.DS_Store
+
+# 签名密钥（如有）
+*.jks
+*.keystore

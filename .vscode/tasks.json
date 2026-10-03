@@ -1,0 +1,22 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "assembleDebug",
+      "type": "shell",
+      "command": ".\\gradlew.bat",
+      "args": [":app:assembleDebug", "--console=plain"],
+      "options": {
+        "cwd": "${workspaceFolder}",
+        "env": {
+          "JAVA_HOME": "D:\\sdk\\jdk-17.0.20.1+1"
+        }
+      },
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "problemMatcher": []
+    }
+  ]
+}
