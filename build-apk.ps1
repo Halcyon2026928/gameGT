@@ -1,6 +1,6 @@
 # 重新构建「去启动动画」LSPosed 模块 APK（无 Gradle，直接用 Android SDK 工具链）
 # 用法：powershell -ExecutionPolicy Bypass -File build-apk.ps1
-# 产物：NoStartupAnimation-LSPosed-v1.1.apk（项目根目录）
+# 产物：NoStartupAnimation-LSPosed-v1.2.apk（项目根目录）
 
 $ErrorActionPreference = "Stop"
 $Project = "D:\Androidstudio\gameGT"
@@ -47,7 +47,7 @@ Pop-Location
 
 # 6) 对齐 + 签名
 & "$BT\zipalign.exe" -f 4 "$Build\unsigned.apk" "$Build\aligned.apk"
-$Final = Join-Path $Project "NoStartupAnimation-LSPosed-v1.1.apk"
+$Final = Join-Path $Project "NoStartupAnimation-LSPosed-v1.2.apk"
 Remove-Item $Final -Force -ErrorAction SilentlyContinue
 & "$BT\apksigner.bat" sign --ks "$Build\debug.keystore" `
     --ks-key-alias androiddebugkey --ks-pass pass:android --key-pass pass:android `

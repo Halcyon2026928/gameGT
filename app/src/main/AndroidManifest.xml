@@ -2,7 +2,7 @@
 
     <application
         android:theme="@android:style/Theme.Material.Light"
-        android:label="去启动动画">
+        android:label="gameGT">
         <meta-data android:name="xposedmodule" android:value="true"/>
         <meta-data android:name="xposeddescription" android:value="屏蔽游戏助手(com.oplus.games)的启动动画（GTBoost/HyperBoost/unique）"/>
         <meta-data android:name="xposedminversion" android:value="54"/>
