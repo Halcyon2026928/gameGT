@@ -5,8 +5,9 @@
         <item name="colorPrimaryVariant">@color/accent_purple</item>
         <item name="colorOnPrimary">@color/bg_start</item>
         <item name="colorSecondary">@color/accent_purple</item>
-        <item name="android:statusBarColor">@color/bg_start</item>
-        <item name="android:navigationBarColor">@color/bg_start</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
         <item name="android:windowBackground">@drawable/bg_gradient</item>
+        <item name="android:windowDrawsSystemBarBackgrounds">true</item>
     </style>
 </resources>

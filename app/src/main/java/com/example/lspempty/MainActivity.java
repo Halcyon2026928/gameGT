@@ -44,6 +44,21 @@ public class MainActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
+        // 沉浸式状态栏：内容延伸到状态栏下方，根据主题切换状态栏文字颜色
+        getWindow().getDecorView().setSystemUiVisibility(
+                View.SYSTEM_UI_FLAG_LAYOUT_STABLE | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN);
+        if (light) {
+            // 浅色主题：状态栏文字用深色
+            getWindow().getDecorView().setSystemUiVisibility(
+                    getWindow().getDecorView().getSystemUiVisibility()
+                            | View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR);
+        }
+        // 给内容加顶部 padding，避免被状态栏遮挡
+        int resId = getResources().getIdentifier("status_bar_height", "dimen", "android");
+        int statusBarHeight = resId > 0 ? getResources().getDimensionPixelSize(resId) : 0;
+        View rootScroll = findViewById(R.id.rootScroll);
+        rootScroll.setPadding(0, statusBarHeight, 0, 0);
+
         swStartup = findViewById(R.id.swStartup);
         swApps = findViewById(R.id.swApps);
         swRecommend = findViewById(R.id.swRecommend);
