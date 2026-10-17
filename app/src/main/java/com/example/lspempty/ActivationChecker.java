@@ -2,6 +2,7 @@ package com.example.lspempty;
 
 import android.database.Cursor;
 import android.database.sqlite.SQLiteDatabase;
+import android.util.Log;
 
 import java.io.File;
 
@@ -9,10 +10,16 @@ import java.io.File;
  * 是否对「游戏助手」生效：读 LSPosed 的 modules_config.db
  *（和 LSPosed Manager 勾选作用域是同一份表）。
  *
- * 已激活 = 本模块 enabled=1 且 scope 含 com.oplus.games。
- * 只勾选模块、不勾选游戏助手 → 未激活。
+ * 表结构（LSPosed 新版）：
+ *   modules(module_pkg_name, apk_path) — 已安装模块列表，不含启用状态
+ *   modules_state(module_pkg_name, user_id, enabled, scope_request_blocked) — 模块启用状态
+ *   scope(module_pkg_name, app_pkg_name, user_id) — 作用域
+ *
+ * 已激活 = modules_state.enabled=1 且 scope 含 com.oplus.games。
  */
 final class ActivationChecker {
+
+    private static final String TAG = "GTBoost.Activation";
 
     static final String TARGET_PKG = "com.oplus.games";
     static final String MODULE_PKG = "com.example.lspempty";
@@ -34,55 +41,46 @@ final class ActivationChecker {
             db = SQLiteDatabase.openDatabase(
                     local.getAbsolutePath(), null, SQLiteDatabase.OPEN_READONLY);
             return moduleEnabledAndGamesInScope(db);
-        } catch (Throwable ignored) {
+        } catch (Throwable t) {
+            Log.e(TAG, "open db failed: " + t);
             return false;
         } finally {
             if (db != null) {
-                try {
-                    db.close();
-                } catch (Throwable ignored) {
-                }
+                try { db.close(); } catch (Throwable ignored) {}
             }
             deleteLocalCopies(local);
         }
     }
 
     private static boolean moduleEnabledAndGamesInScope(SQLiteDatabase db) {
-        try {
-            int mid = -1;
-            boolean enabled = false;
-            try (Cursor c = db.rawQuery(
-                    "SELECT mid, enabled FROM modules WHERE module_pkg_name=?",
-                    new String[]{MODULE_PKG})) {
-                if (c.moveToFirst()) {
-                    mid = c.getInt(0);
-                    enabled = c.getInt(1) == 1;
+        // 1) 查 modules_state 表：模块启用状态在这张表（modules 表只是已安装模块列表，不含启用状态）
+        boolean enabled = false;
+        try (Cursor c = db.rawQuery(
+                "SELECT enabled FROM modules_state WHERE module_pkg_name=?",
+                new String[]{MODULE_PKG})) {
+            if (c.moveToFirst()) {
+                enabled = c.getInt(0) == 1;
+            }
+        } catch (Throwable t) {
+            Log.e(TAG, "modules_state query failed: " + t);
+            return false;
+        }
+        if (!enabled) {
+            return false;
+        }
+
+        // 2) 查 scope 表：确认 com.oplus.games 在作用域内
+        try (Cursor c = db.rawQuery(
+                "SELECT app_pkg_name FROM scope WHERE module_pkg_name=?",
+                new String[]{MODULE_PKG})) {
+            while (c.moveToNext()) {
+                if (TARGET_PKG.equals(c.getString(0))) {
+                    return true;
                 }
             }
-            if (!enabled || mid < 0) {
-                return false;
-            }
-            try (Cursor c = db.rawQuery(
-                    "SELECT app_pkg_name FROM scope WHERE mid=?",
-                    new String[]{String.valueOf(mid)})) {
-                while (c.moveToNext()) {
-                    if (TARGET_PKG.equals(c.getString(0))) {
-                        return true;
-                    }
-                }
-            }
-        } catch (Throwable ignored) {
-            try (Cursor c = db.rawQuery(
-                    "SELECT app_pkg_name FROM scope WHERE module_pkg_name=?",
-                    new String[]{MODULE_PKG})) {
-                while (c.moveToNext()) {
-                    if (TARGET_PKG.equals(c.getString(0))) {
-                        return true;
-                    }
-                }
-            } catch (Throwable ignored2) {
-                return false;
-            }
+        } catch (Throwable t) {
+            Log.e(TAG, "scope query failed: " + t);
+            return false;
         }
         return false;
     }
